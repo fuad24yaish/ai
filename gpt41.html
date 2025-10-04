@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>OpenAI Responses API — Files & Attachments (Insecure Demo)</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;max-width:900px;margin:auto;padding:20px}
+  #responseArea{white-space:pre-wrap;border:1px solid #ccc;padding:10px;min-height:150px;background:#fafafa}
+  input,select,button,textarea{padding:8px;margin-top:6px}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .warn{background:#fff7d6;border:1px solid #e7d070;padding:8px 10px;border-radius:6px}
+  #fileList{font-size:12px;color:#555;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<h1>Responses API — Files & Attachments</h1>
+<p class="warn"><b>Warning:</b> This page sends your API key from the browser. Use only for quick local tests.</p>
+
+<label>API Key:</label><br>
+<input type="password" id="apiKey" placeholder="sk-..." size="60"><br><br>
+
+<label>Prompt:</label><br>
+<input type="text" id="userInput" style="width:100%" placeholder="Ask about the attached files or type your question..."><br>
+
+<div class="row">
+  <label>Local attachments (images / audio / .txt / .pdf / .docx):</label>
+  <input
+    type="file"
+    id="attachments"
+    multiple
+    accept="image/*,audio/*,.txt,application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,.doc">
+</div>
+<div id="fileList"></div>
+
+<div class="row" style="margin-top:10px">
+  <div style="flex:1;min-width:280px">
+    <label>Remote file IDs (PDF, DOCX, etc.) — comma or newline separated</label><br>
+    <textarea id="fileIds" rows="3" style="width:100%" placeholder="file_abc123, file_def456"></textarea>
+    <div style="font-size:12px;color:#666;margin-top:4px">
+      Upload documents via <code>POST /v1/files</code> (<code>purpose=user_data</code>), then paste their <code>file_id</code> values here.
+    </div>
+  </div>
+</div>
+
+<div class="row" style="margin-top:10px">
+  <label>Model:</label>
+  <select id="model">
+    <option value="gpt-5" selected>gpt-5</option>
+    <option value="gpt-5-mini">gpt-5-mini</option>
+    <option value="gpt-5-thinking">gpt-5-thinking</option>
+    <option value="gpt-4o-mini">gpt-4o-mini</option>
+    <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+    <option value="gpt-4.1">gpt-4.1</option>
+  </select>
+  <label><input type="checkbox" id="streamToggle" checked> Stream</label>
+</div>
+
+<br>
+<button id="runBtn">Run</button>
+
+<h2>Response</h2>
+<div id="responseArea"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// === tunables ===
+const MAX_INLINE_BYTES = 10 * 1024 * 1024; // 10MB cap for inline PDF/DOCX; bigger -> use /v1/files
+const SUPPORTED_INLINE_MIME = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/msword", // legacy .doc (best effort)
+]);
+
+$('attachments').addEventListener('change', () => {
+  const files = $('attachments').files;
+  $('fileList').textContent = [...files].map(f => `• ${f.name} (${f.type || 'unknown'}, ${(f.size/1024).toFixed(1)} KB)`).join('\n');
+});
+$('runBtn').addEventListener('click', run);
+
+async function run(){
+  const apiKey = $('apiKey').value.trim();
+  const responseArea = $('responseArea');
+  const model = $('model').value;
+  const stream = $('streamToggle').checked;
+
+  const userText = $('userInput').value;
+  const localFiles = $('attachments').files;
+  const fileIds = parseFileIds($('fileIds').value);
+
+  responseArea.textContent = '';
+  if(!apiKey){ responseArea.textContent='Enter API key.'; return; }
+  if(!userText && !localFiles.length && !fileIds.length){
+    responseArea.textContent='Enter a prompt or provide files.';
+    return;
+  }
+
+  try {
+    // Build user content parts (text + inline media + small PDFs/DOCX)
+    const content = await buildContent(userText, localFiles);
+
+    // Build attachments for pre-uploaded files (PDF/DOCX/etc.) using File Search
+    const attachments = fileIds.map(id => ({
+      file_id: id,
+      tools: [{ type: 'file_search' }]
+    }));
+
+    const body = {
+      model,
+      input: [{ role: 'user', content }],
+      tools: attachments.length ? [{ type: 'file_search' }] : undefined,
+      attachments: attachments.length ? attachments : undefined,
+      stream: !!stream
+    };
+
+    if (stream) {
+      await streamResponse(apiKey, body, responseArea);
+    } else {
+      await jsonResponse(apiKey, body, responseArea);
+    }
+  } catch (e){
+    responseArea.textContent = 'Error: ' + (e?.message || e);
+    console.error(e);
+  }
+}
+
+function parseFileIds(s){
+  if(!s) return [];
+  return s.split(/[\s,]+/).map(x=>x.trim()).filter(Boolean);
+}
+
+async function buildContent(userText, files){
+  const parts = [];
+  if (userText) parts.push({ type: 'input_text', text: userText });
+
+  for (const f of files){
+    const lowerName = (f.name || '').toLowerCase();
+
+    if (f.type.startsWith('image/')){
+      const dataUrl = await readAsDataURL(f);
+      parts.push({ type: 'input_image', image_url: dataUrl });
+      continue;
+    }
+
+    if (f.type.startsWith('audio/')){
+      const { base64, fmt } = await toBase64Fmt(f);
+      parts.push({ type: 'input_audio', audio: { data: base64, format: fmt } });
+      continue;
+    }
+
+    if (isTxt(f)){
+      const txt = await readAsText(f);
+      parts.push({ type: 'input_text', text: `File ${f.name}:\n` + txt });
+      continue;
+    }
+
+    // Small PDF/DOCX inline via input_file (base64 data URL)
+    if (SUPPORTED_INLINE_MIME.has(f.type) || lowerName.endsWith('.pdf') || lowerName.endsWith('.docx') || lowerName.endsWith('.doc')) {
+      if (f.size > MAX_INLINE_BYTES) {
+        console.warn(`Skipping inline ${f.name} (size ${(f.size/1024/1024).toFixed(2)} MB > ${MAX_INLINE_BYTES/1024/1024} MB). Upload via /v1/files and use file_id.`);
+        continue;
+      }
+      const dataUrl = await toDataURLWithMime(f); // data:application/pdf;base64,....
+      parts.push({
+        type: 'input_file',
+        file: {
+          file_data: dataUrl,
+          filename: f.name // optional but nice to have
+          // mime_type inferred from data URL; can add explicit mime_type if needed
+        }
+      });
+      continue;
+    }
+
+    console.warn(`Skipping unsupported inline file ${f.name}. For larger/other formats, upload via /v1/files and use File IDs.`);
+  }
+
+  return parts;
+}
+
+function isTxt(file){
+  const n = (file.name || '').toLowerCase();
+  return file.type === 'text/plain' || n.endsWith('.txt');
+}
+
+function readAsDataURL(file){
+  return new Promise((res, rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsDataURL(file); });
+}
+function readAsText(file){
+  return new Promise((res, rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result||'')); r.onerror=()=>rej(r.error); r.readAsText(file); });
+}
+
+async function toDataURLWithMime(file){
+  // Use FileReader to produce a proper data URL with MIME type.
+  // For PDF it will look like: data:application/pdf;base64,....
+  return await readAsDataURL(file);
+}
+
+async function toBase64Fmt(file){
+  const buf = await file.arrayBuffer();
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const t = (file.type || '').toLowerCase();
+  let fmt = 'mp3';
+  if (t.includes('wav')) fmt='wav';
+  else if (t.includes('mpeg')||t.includes('mp3')) fmt='mp3';
+  else if (t.includes('m4a') || file.name.toLowerCase().endsWith('.m4a')) fmt='m4a';
+  else if (t.includes('ogg')) fmt='ogg';
+  else if (t.includes('webm')) fmt='webm';
+  return { base64, fmt };
+}
+
+async function streamResponse(apiKey, body, responseArea){
+  const r = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if(!r.ok){
+    let msg = `${r.status} ${r.statusText}`;
+    try { const j = await r.json(); if (j?.error?.message) msg =
