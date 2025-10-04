@@ -222,3 +222,40 @@ async function streamResponse(apiKey, body, responseArea){
         if (event === 'response.output_text.delta' && payload?.delta){
           responseArea.textContent += payload.delta;
         }
+        if (event === 'response.error'){
+          throw new Error(payload?.error?.message || 'Streaming error');
+        }
+      } catch { /* ignore keep-alives */ }
+    }
+  }
+}
+
+async function jsonResponse(apiKey, body, responseArea){
+  const r = await fetch('https://api.openai.com/v1/responses', {
+    method:'POST',
+    headers:{ 'Authorization':`Bearer ${apiKey}`, 'Content-Type':'application/json' },
+    body: JSON.stringify(body)
+  });
+  const j = await r.json();
+  if(!r.ok) throw new Error(j?.error?.message || r.statusText);
+
+  let text = '';
+  if (typeof j.output_text === 'string') text = j.output_text;
+  else if (Array.isArray(j.output)){
+    for (const item of j.output){
+      if (Array.isArray(item?.content)){
+        for (const c of item.content){
+          if (c?.type === 'output_text' && typeof c?.text === 'string') text += c.text;
+        }
+      }
+    }
+  }
+  responseArea.textContent = text || '[No text output]';
+}
+
+async function safeJson(r){ try{ return await r.clone().json(); } catch { return null; } }
+
+function append(el, msg){ el.textContent += (el.textContent ? '\n' : '') + msg; }
+</script>
+</body>
+</html>
