@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>GPT‑5 Chat • Conversations API (Streaming, Files, Diagnostics)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0b0d11; --panel:#12151b; --muted:#9aa4b2; --accent:#4aa7ff; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444; --user:#1e293b; --assistant:#0f172a; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:#e5e7eb; font:15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    header { position:sticky; top:0; background:linear-gradient(180deg,#0b0d11 0%, #0b0d11cc 100%); border-bottom:1px solid #1f2937; padding:10px 14px; display:flex; gap:12px; align-items:center; z-index:2; flex-wrap:wrap; }
+    header input[type="password"], header input[type="text"] { background:#0f172a; border:1px solid #1f2937; color:#e5e7eb; border-radius:8px; padding:8px 10px; width:260px; }
+    header .small { color:var(--muted); font-size:12px; }
+    header .pill { font-size:12px; border:1px solid #1f2937; padding:4px 8px; border-radius:999px; color:#cbd5e1; }
+
+    #chat { max-width:980px; margin:10px auto 220px; padding:0 14px; }
+    .bubble { display:flex; gap:10px; margin:16px 0; }
+    .bubble .avatar { flex:0 0 36px; height:36px; border-radius:8px; background:#1f2937; display:grid; place-items:center; font-weight:700; }
+    .user .avatar { background:#2a3649; }
+    .assistant .avatar { background:#1b2838; }
+    .msg { background:var(--panel); border:1px solid #1f2937; border-radius:12px; padding:12px 14px; white-space:pre-wrap; }
+    .user .msg { background:var(--user); }
+    .assistant .msg { background:var(--assistant); }
+    .files { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+    .filepill { font-size:12px; padding:4px 8px; border:1px solid #334155; border-radius:999px; color:#cbd5e1; }
+
+    footer { position:fixed; bottom:0; left:0; right:0; background:linear-gradient(180deg,#0b0d11cc 0%, #0b0d11 100%); border-top:1px solid #1f2937; padding:10px 14px; }
+    #composer { max-width:980px; margin:0 auto; display:grid; grid-template-columns: 1fr auto; gap:10px; align-items:end; }
+    #input { min-height:48px; max-height:180px; resize:vertical; width:100%; border-radius:12px; border:1px solid #1f2937; background:#0f172a; color:#e5e7eb; padding:12px; }
+    #controls { display:flex; gap:10px; flex-wrap:wrap; }
+    button, label.btn { background:#1d4ed8; border:none; color:white; padding:10px 14px; border-radius:10px; cursor:pointer; }
+    button.secondary, label.btn.secondary { background:#0b1220; color:#cbd5e1; border:1px solid #1f2937; }
+    input[type="file"] { display:none; }
+    .hint { color:var(--muted); font-size:12px; margin-top:4px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .error { color:#fca5a5; font-size:12px; }
+    .statusline { font-size:12px; }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .err { color: var(--err); }
+
+    details.diag { max-width:980px; margin:8px auto 0; padding:0 14px; }
+    .panel { background:#0f172a; border:1px solid #1f2937; border-radius:10px; padding:10px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    pre.small { font-size:12px; white-space:pre-wrap; word-break:break-word; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="row" style="flex-wrap:nowrap"><strong>Conversations API Demo</strong><span class="pill">Streaming + Files + Vector Store</span></div>
+    <div class="row">
+      <span class="small">API key</span>
+      <input id="apiKey" type="password" placeholder="sk-..." />
+      <span class="small">Model</span>
+      <input id="model" type="text" value="gpt-5" />
+      <span class="small">Vector Store</span>
+      <input id="vectorStore" type="text" placeholder="vs_..." />
+      <span class="small">Org (opt)</span>
+      <input id="org" type="text" placeholder="org_..." />
+      <span class="small">Project (opt)</span>
+      <input id="project" type="text" placeholder="proj_..." />
+    </div>
+  </header>
+
+  <main id="chat"></main>
+
+  <details class="diag" open>
+    <summary>Diagnostics & Test Cases</summary>
+    <div class="panel">
+      <div class="row">
+        <button id="btnTestModels" class="secondary">Test #1: Verify API Key (GET /models)</button>
+        <button id="btnTestConv" class="secondary">Test #2: Create Conversation</button>
+        <button id="btnTestItem" class="secondary">Test #3: Add User Item</button>
+        <button id="btnTestStream" class="secondary">Test #4: Stream Response</button>
+        <button id="btnTestAttachOnly" class="secondary">Test #5: Attach‑only Message</button>
+        <button id="btnShowCurl" class="secondary">Show cURL snippets</button>
+      </div>
+      <div id="diagOut" class="mono"><div class="hint">Run tests to see raw responses here.</div></div>
+    </div>
+  </details>
+
+  <footer>
+    <div id="composer">
+      <div>
+        <textarea id="input" placeholder="Message GPT‑5..." rows="3"></textarea>
+        <div class="row">
+          <label class="btn secondary" for="fileInput">📎 Attach files</label>
+          <input id="fileInput" type="file" multiple />
+          <span id="fileNames" class="hint">No files selected</span>
+          <span id="status" class="hint statusline"></span>
+        </div>
+      </div>
+      <div id="controls">
+        <button id="sendBtn">Send</button>
+        <button id="stopBtn" class="secondary" disabled>Stop</button>
+        <button id="clearBtn" class="secondary">Clear</button>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // ====== CONFIG (dev-only: don't hardcode keys in production!) ======
+    const DEFAULTS = { API_KEY: "", MODEL: "gpt-5", VECTOR_STORE: "", ORG: "", PROJECT: "" };
+
+    // ====== STATE ======
+    let conversationId = null;
+    let currentController = null;
+    let pendingFiles = [];
+
+    // ====== DOM ======
+    const chatEl = document.getElementById("chat");
+    const inputEl = document.getElementById("input");
+    const fileInputEl = document.getElementById("fileInput");
+    const fileNamesEl = document.getElementById("fileNames");
+    const statusEl = document.getElementById("status");
+
+    const sendBtn = document.getElementById("sendBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const clearBtn = document.getElementById("clearBtn");
+
+    const apiKeyEl = document.getElementById("apiKey");
+    const modelEl = document.getElementById("model");
+    const vectorStoreEl = document.getElementById("vectorStore");
+    const orgEl = document.getElementById("org");
+    const projectEl = document.getElementById("project");
+
+    const btnTestModels = document.getElementById("btnTestModels");
+    const btnTestConv = document.getElementById("btnTestConv");
+    const btnTestItem = document.getElementById("btnTestItem");
+    const btnTestStream = document.getElementById("btnTestStream");
+    const btnTestAttachOnly = document.getElementById("btnTestAttachOnly");
+    const btnShowCurl = document.getElementById("btnShowCurl");
+    const diagOut = document.getElementById("diagOut");
+
+    // Prefill inputs
+    apiKeyEl.value = DEFAULTS.API_KEY; modelEl.value = DEFAULTS.MODEL; vectorStoreEl.value = DEFAULTS.VECTOR_STORE; orgEl.value = DEFAULTS.ORG; projectEl.value = DEFAULTS.PROJECT;
+
+    // ====== UI handlers ======
+    fileInputEl.addEventListener("change", () => {
+      pendingFiles = Array.from(fileInputEl.files || []);
+      fileNamesEl.textContent = pendingFiles.length ? pendingFiles.map(f => f.name).join(", ") : "No files selected";
+    });
+
+    apiKeyEl.addEventListener("input", () => { sendBtn.disabled = !apiKeyEl.value.trim(); });
+    sendBtn.disabled = !apiKeyEl.value.trim();
+
+    sendBtn.addEventListener("click", () => sendMessage());
+    stopBtn.addEventListener("click", () => abortStream());
+    clearBtn.addEventListener("click", () => { chatEl.innerHTML = ""; conversationId = null; logDiag('Cleared chat & conversation id.'); });
+
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    });
+
+    // Diagnostics buttons ("test cases")
+    btnTestModels.addEventListener('click', () => testModels());
+    btnTestConv.addEventListener('click', () => testCreateConversation());
+    btnTestItem.addEventListener('click', () => testAddItem());
+    btnTestStream.addEventListener('click', () => testStream());
+    btnTestAttachOnly.addEventListener('click', () => testAttachOnly());
+    btnShowCurl.addEventListener('click', () => showCurl());
+
+    // ====== Helpers ======
+    function escapeHtml(s) { return (s||"").toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
+
+    function appendBubble(role, text = "", files = []) {
+      const div = document.createElement("div");
+      div.className = "bubble " + role;
+      div.innerHTML = `
+        <div class="avatar">${role === "user" ? "U" : "G"}</div>
+        <div class="msg">
+          <div class="text">${escapeHtml(text)}</div>
+          ${files.length ? `<div class="files">${files.map(n=>`<span class="filepill">${escapeHtml(n)}</span>`).join("")}</div>` : ""}
+        </div>`;
+      chatEl.appendChild(div);
+      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+      return div.querySelector(".text");
+    }
+
+    function setStatus(msg, level){
+      statusEl.textContent = msg || "";
+      statusEl.className = "hint statusline" + (level ? " " + level : "");
+    }
+
+    function sanitizeKey(raw){ return (raw||"").trim().replace(/\s+/g, ""); }
+
+    function buildHeaders(apiKey){
+      const h = { "Authorization": `Bearer ${apiKey}` };
+      const org = orgEl.value.trim();
+      const project = projectEl.value.trim();
+      if (org) h["OpenAI-Organization"] = org; // some workspaces require org header
+      if (project) h["OpenAI-Project"] = project; // some keys are project-scoped
+      return h;
+    }
+
+    async function readJsonOrText(res){
+      const txt = await res.text();
+      try { return JSON.parse(txt); } catch { return { __raw: txt }; }
+    }
+
+    function logDiag(msg, data){
+      const row = document.createElement('div');
+      row.innerHTML = `<div class="mono"><span class="hint">${new Date().toLocaleTimeString()}:</span> ${escapeHtml(msg)}</div>`;
+      if (data !== undefined) {
+        const pre = document.createElement('pre');
+        pre.className = 'small mono';
+        pre.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        row.appendChild(pre);
+      }
+      diagOut.prepend(row);
+    }
+
+    // ====== API calls ======
+    async function ensureConversation(apiKey) {
+      if (conversationId) return conversationId;
+      const res = await fetch("https://api.openai.com/v1/conversations", {
+        method: "POST",
+        headers: { ...buildHeaders(apiKey), "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      if (!res.ok) {
+        const body = await readJsonOrText(res);
+        logDiag(`❌ Create conversation failed (${res.status})`, body);
+        throw new Error("Failed to create conversation");
+      }
+      const data = await res.json();
+      conversationId = data.id;
+      logDiag("✅ Conversation created", data);
+      return conversationId;
+    }
+
+    async function uploadFiles(apiKey, files) {
+      const uploaded = [];
+      for (const file of files) {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("purpose", "assistants");
+        let res = await fetch("https://api.openai.com/v1/files", { method: "POST", headers: buildHeaders(apiKey), body: form });
+        if (!res.ok) {
+          const t1 = await res.text();
+          logDiag(`⚠️ Upload failed with purpose=assistants for ${file.name} (${res.status})`, t1);
+          const form2 = new FormData(); form2.append("file", file); form2.append("purpose", "input");
+          res = await fetch("https://api.openai.com/v1/files", { method: "POST", headers: buildHeaders(apiKey), body: form2 });
+          if (!res.ok) {
+            const t2 = await res.text();
+            logDiag(`❌ Upload failed with purpose=input for ${file.name} (${res.status})`, t2);
+            throw new Error("File upload failed: " + file.name);
+          }
+        }
+        const json = await res.json();
+        uploaded.push({ id: json.id, name: file.name });
+      }
+      logDiag("✅ Files uploaded", uploaded);
+      return uploaded;
+    }
+
+    async function addUserItem(apiKey, convId, text, fileObjs) {
+      const attachments = (fileObjs||[]).map(f => ({ file_id: f.id, tools: [{ type: "file_search" }] }));
+      const item = {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: text || "" }]
+      };
+      if (attachments.length) item.attachments = attachments;
+      const payload = { items: [ item ] };
+      const res = await fetch(`https://api.openai.com/v1/conversations/${convId}/items`, {
+        method: "POST",
+        headers: { ...buildHeaders(apiKey), "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const t = await readJsonOrText(res);
+        logDiag(`❌ Add item failed (${res.status})`, t);
+        throw new Error("Failed to add user message");
+      }
+      const json = await res.json();
+      logDiag("✅ Item added", json);
+      return json;
+    }
+
+    async function streamResponse(apiKey, convId, model, vectorStoreId, onDelta, onDone) {
+      // Follow Responses Streaming docs: POST /v1/responses with stream=true
+      const body = {
+        model,
+        conversation: { id: convId },
+        // Docs require `input`; we provide an empty list to respond using the
+        // conversation state (we already added the user item). If you prefer to
+        // pass the prompt directly here, supply it instead of an empty array.
+        input: [],
+        tools: [
+          { type: "file_search", ...(vectorStoreId ? { vector_store_ids: [vectorStoreId] } : {}) }
+        ],
+        stream: true
+      };
+
+      currentController = new AbortController();
+      stopBtn.disabled = false;
+
+      const res = await fetch(`https://api.openai.com/v1/responses`, {
+        method: "POST",
+        signal: currentController.signal,
+        headers: { ...buildHeaders(apiKey), "Content-Type": "application/json", "Accept": "text/event-stream" },
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok || !res.body) { const t = await readJsonOrText(res); logDiag(`❌ Start stream failed (${res.status})`, t); throw new Error("Failed to start stream"); }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+
+      // Robust SSE parser per docs: handle optional `event:` lines and multi-line `data:`
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("
+
+");
+        buffer = chunks.pop();
+        for (const chunk of chunks) {
+          if (!chunk.trim()) continue;
+
+          // Special terminal token
+          if (chunk.trim() === "data: [DONE]") { onDone(); return; }
+
+          let eventName = null;
+          const dataLines = [];
+          for (const line of chunk.split("
+")) {
+            if (line.startsWith("event:")) eventName = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+          }
+          const dataStr = dataLines.join("
+");
+          if (!dataStr) continue;
+
+          try {
+            const payload = JSON.parse(dataStr);
+            const type = payload.type || eventName;
+            if (type === "response.output_text.delta") {
+              onDelta(payload.delta || payload.text || "");
+            } else if (type === "response.completed") {
+              onDone();
+            } else if (type === "error") {
+              logDiag("❌ Stream error event", payload);
+            }
+          } catch (e) {
+            // Some servers send keepalives / comments; ignore parsing errors
+          }
+        }
+      }
+      onDone();
+      currentController = null;
+      stopBtn.disabled = true;
+    }
+
+    function abortStream(){ if (currentController){ currentController.abort(); currentController = null; } stopBtn.disabled = true; }(){ if (currentController){ currentController.abort(); currentController = null; } stopBtn.disabled = true; }
+
+    // ====== Main send ======
+    async function sendMessage(){
+      let apiKey = sanitizeKey(apiKeyEl.value);
+      const model = (modelEl.value || "gpt-5").trim();
+      const vectorStoreId = (vectorStoreEl.value || "").trim();
+      const text = (inputEl.value || "").trim();
+
+      if (!apiKey) { alert("Enter your API key in the header bar first."); return; }
+      if (!apiKey.startsWith('sk-')) { if(!confirm('Your key does not start with "sk-". Continue anyway?')) return; }
+      if (!text && !pendingFiles.length) return;
+
+      appendBubble("user", text || "(no message)", pendingFiles.map(f => f.name));
+      inputEl.value = "";
+
+      try {
+        setStatus("Creating conversation…", '');
+        const convId = await ensureConversation(apiKey);
+
+        let uploaded = [];
+        if (pendingFiles.length) {
+          setStatus("Uploading files…", '');
+          uploaded = await uploadFiles(apiKey, pendingFiles);
+        }
+
+        setStatus("Sending message…", '');
+        await addUserItem(apiKey, convId, text || "", uploaded);
+
+        pendingFiles = []; fileInputEl.value = ""; fileNamesEl.textContent = "No files selected";
+
+        const target = appendBubble("assistant", "");
+        setStatus("Streaming response…", '');
+        await streamResponse(
+          apiKey, convId, model, vectorStoreId,
+          (delta) => { target.textContent += delta; window.scrollTo({ top: document.body.scrollHeight }); },
+          () => { setStatus(""); stopBtn.disabled = true; }
+        );
+
+      } catch (err) {
+        console.error(err);
+        appendBubble("assistant", "⚠️ " + (err?.message || "Unexpected error"));
+        setStatus("Error — see Diagnostics above.", 'err');
+      } finally {
+        stopBtn.disabled = true;
+      }
+    }
+
+    // ====== Test Cases (Diagnostics) ======
+    async function testModels(){
+      const apiKey = sanitizeKey(apiKeyEl.value); if(!apiKey){ alert('Enter API key'); return; }
+      const res = await fetch('https://api.openai.com/v1/models', { headers: buildHeaders(apiKey) });
+      const body = await readJsonOrText(res);
+      logDiag(res.ok ? '✅ GET /models OK' : `❌ GET /models ${res.status}`, body);
+    }
+
+    async function testCreateConversation(){
+      const apiKey = sanitizeKey(apiKeyEl.value); if(!apiKey){ alert('Enter API key'); return; }
+      conversationId = null; // force new
+      try { await ensureConversation(apiKey); } catch (e) { /* handled in ensureConversation */ }
+    }
+
+    async function testAddItem(){
+      const apiKey = sanitizeKey(apiKeyEl.value); if(!apiKey){ alert('Enter API key'); return; }
+      const cid = await ensureConversation(apiKey).catch(()=>null); if(!cid) return;
+      await addUserItem(apiKey, cid, 'ping from diagnostics', []).catch(()=>{});
+    }
+
+    async function testStream(){
+      const apiKey = sanitizeKey(apiKeyEl.value); if(!apiKey){ alert('Enter API key'); return; }
+      const model = (modelEl.value || 'gpt-5').trim();
+      const cid = await ensureConversation(apiKey).catch(()=>null); if(!cid) return;
+      await addUserItem(apiKey, cid, 'Reply only with the single word: pong', []).catch(()=>{});
+      const sink = appendBubble('assistant', '');
+      await streamResponse(apiKey, cid, model, (vectorStoreEl.value||'').trim(),
+        (d)=>{ sink.textContent += d; },
+        ()=>{ logDiag('✅ Stream completed'); }
+      ).catch(()=>{});
+    }
+
+    async function testAttachOnly(){
+      const apiKey = sanitizeKey(apiKeyEl.value); if(!apiKey){ alert('Enter API key'); return; }
+      const cid = await ensureConversation(apiKey).catch(()=>null); if(!cid) return;
+      if (!fileInputEl.files.length) { alert('Choose at least one file first.'); return; }
+      const uploaded = await uploadFiles(apiKey, Array.from(fileInputEl.files));
+      await addUserItem(apiKey, cid, '', uploaded).catch(()=>{});
+      const sink = appendBubble('assistant', '');
+      await streamResponse(apiKey, cid, (modelEl.value||'gpt-5').trim(), (vectorStoreEl.value||'').trim(),
+        (d)=>{ sink.textContent += d; },
+        ()=>{ logDiag('✅ Attach‑only stream completed'); }
+      ).catch(()=>{});
+    }
+
+    function showCurl(){
+      const apiKey = sanitizeKey(apiKeyEl.value) || 'sk-***';
+      const org = orgEl.value.trim(); const project = projectEl.value.trim();
+      const headers = [
+        `-H "Authorization: Bearer ${apiKey}"`,
+        org ? `-H "OpenAI-Organization: ${org}"` : '',
+        project ? `-H "OpenAI-Project: ${project}"` : '',
+        `-H "Content-Type: application/json"`
+      ].filter(Boolean).join(' ');
+
+      const curlConv = `curl https://api.openai.com/v1/conversations ${headers} -d '{}'`;
+      const curlItem = `curl https://api.openai.com/v1/conversations/$CONV_ID/items ${headers} -d '{"items":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Hello"}]}]}'`;
+      const curlResp = `curl https://api.openai.com/v1/responses ${headers} -d '{"model":"gpt-5","conversation":{"id":"$CONV_ID"},"input":[],"tools":[{"type":"file_search"}]}'`;
+
+      logDiag('cURL snippets', `${curlConv}\n\n${curlItem}\n\n${curlResp}`);
+    }
+  </script>
+</body>
+</html>
