@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>OpenAI Responses API (Insecure Demo)</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: auto; padding: 20px; }
+    #controls { margin-bottom: 20px; }
+    #userInput, #apiKey { width: 100%; padding: 8px; box-sizing: border-box; }
+    #responseArea { white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; min-height: 120px; background: #f9f9f9; }
+    button { padding: 10px 15px; margin-top: 10px; }
+    .row { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+    .row label { white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <h1>OpenAI Responses API (Insecure Demo)</h1>
+  <p><strong>Warning:</strong> This page sends your API key from the browser.
+    For production, call OpenAI from a secure server.</p>
+
+  <div id="controls">
+    <label for="apiKey">Your OpenAI API Key:</label>
+    <input type="password" id="apiKey" placeholder="sk-..." />
+
+    <br><br>
+    <label for="userInput">Your Prompt:</label>
+    <input type="text" id="userInput" placeholder="Ask me anything..." />
+
+    <div class="row">
+      <label><input type="checkbox" id="streamToggle" checked /> Stream output</label>
+      <label>Model:&nbsp;
+        <select id="model">
+          <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
+          <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+          <option value="gpt-4.1">gpt-4.1</option>
+        </select>
+      </label>
+    </div>
+
+    <button id="runBtn">Run</button>
+  </div>
+
+  <h2>Response</h2>
+  <div id="responseArea"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    $('runBtn').addEventListener('click', run);
+
+    async function run() {
+      const apiKey = $('apiKey').value.trim();
+      const userInput = $('userInput').value;
+      const responseArea = $('responseArea');
+      const model = $('model').value;
+      const stream = $('streamToggle').checked;
+
+      responseArea.textContent = '';
+
+      if (!apiKey) {
+        responseArea.textContent = 'Please enter your API key.';
+        return;
+      }
+      if (!userInput) {
+        responseArea.textContent = 'Please enter a prompt.';
+        return;
+      }
+
+      try {
+        if (stream) {
+          await streamResponse({ apiKey, model, userInput, responseArea });
+        } else {
+          await nonStreamResponse({ apiKey, model, userInput, responseArea });
+        }
+      } catch (err) {
+        responseArea.textContent = `Error: ${err?.message || err}`;
+        console.error(err);
+      }
+    }
+
+    // --- Streaming using SSE events from the Responses API ---
+    async function streamResponse({ apiKey, model, userInput, responseArea }) {
+      const res = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          input: userInput,   // simplest form per docs
+          stream: true,
+          // Optional: include usage summaries at the end
+          stream_options: { include_usage: true }
+        })
+      });
+
+      if (!res.ok) {
+        // Try to parse JSON error payloads from the API
+        let msg = `${res.status} ${res.statusText}`;
+        try {
+          const j = await res.json();
+          if (j?.error?.message) msg = j.error.message;
+        } catch {}
+        throw new Error(msg);
+      }
+
+      const reader = res.body
+        .pipeThrough(new TextDecoderStream())
+        .getReader();
+
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += value;
+
+        // SSE frames are separated by a blank line
+        const parts = buffer.split('\n\n');
+        // Leave the last (possibly partial) frame in buffer
+        buffer = parts.pop();
+
+        for (const part of parts) {
+          // Each frame may contain "event:" and one or more "data:" lines
+          const lines = part.split('\n');
+          let event = null;
+          let data = '';
+
+          for (const line of lines) {
+            if (line.startsWith('event:')) {
+              event = line.slice(6).trim();
+            } else if (line.startsWith('data:')) {
+              // Multiple data lines can occur; concatenate with newlines
+              data += (data ? '\n' : '') + line.slice(5).trim();
+            }
+          }
+
+          if (!data) continue;
+
+          try {
+            const payload = JSON.parse(data);
+
+            // Text deltas arrive as response.output_text.delta
+            if (event === 'response.output_text.delta' && payload?.delta) {
+              responseArea.textContent += payload.delta;
+            }
+
+            // You may also receive tool calls / other events; ignore them here
+
+            // Completion signal
+            if (event === 'response.completed') {
+              // Optionally, inspect usage if you enabled stream_options.include_usage
+              // payload.response?.usage
+            }
+
+            // Error event
+            if (event === 'response.error') {
+              throw new Error(payload?.error?.message || 'Streaming error');
+            }
+          } catch (e) {
+            // Non-JSON keep-alive messages can be ignored safely
+            // console.debug('Non-JSON SSE chunk', part);
+          }
+        }
+      }
+    }
+
+    // --- Non-streaming (single JSON response) ---
+    async function nonStreamResponse({ apiKey, model, userInput, responseArea }) {
+      const res = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          input: userInput
+        })
+      });
+
+      if (!res.ok) {
+        let msg = `${res.status} ${res.statusText}`;
+        try {
+          const j = await res.json();
+          if (j?.error?.message) msg = j.error.message;
+        } catch {}
+        throw new Error(msg);
+      }
+
+      const json = await res.json();
+
+      // The Responses API returns an array of "output" items.
+      // For simple text, the consolidated string is available under output_text (helpers in docs),
+      // but in raw form you can concatenate text items from output[].content[]
+      // Here we try output_text first, then fall back.
+      let text = '';
+      if (typeof json.output_text === 'string') {
+        text = json.output_text;
+      } else if (Array.isArray(json.output)) {
+        for (const item of json.output) {
+          if (Array.isArray(item?.content)) {
+            for (const c of item.content) {
+              if (c?.type === 'output_text' && typeof c?.text === 'string') {
+                text += c.text;
+              }
+            }
+          }
+        }
+      }
+      responseArea.textContent = text || '[No text output]';
+    }
+  </script>
+</body>
+</html>
