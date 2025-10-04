@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>مساعد الذكاء الاصطناعي</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    width: 100%;
+    position: fixed;
+    overflow: hidden;
+  }
+  body {
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    background: #f5f5f5;
+  }
+  
+  header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    flex-shrink: 0;
+  }
+  
+  header h1 {
+    font-size: 18px;
+    font-weight: 600;
+  }
+  
+  #settingsBtn {
+    background: rgba(255,255,255,0.2);
+    border: none;
+    color: white;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+  }
+  
+  #settingsBtn:hover {
+    background: rgba(255,255,255,0.3);
+  }
+  
+  #settingsPanel {
+    background: white;
+    border-bottom: 1px solid #e0e0e0;
+    padding: 16px;
+    display: none;
+    animation: slideDown 0.3s ease;
+    max-height: 40vh;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  
+  #settingsPanel.visible {
+    display: block;
+  }
+  
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  
+  .settings-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  
+  .setting-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  
+  .setting-group label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #555;
+  }
+  
+  .setting-group input[type="password"],
+  .setting-group input[type="text"],
+  .setting-group select,
+  .setting-group textarea {
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+    width: 100%;
+  }
+  
+  .setting-group textarea {
+    resize: vertical;
+    min-height: 60px;
+  }
+  
+  .checkbox-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  
+  .checkbox-group input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+  }
+  
+  .warn {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    color: #856404;
+    padding: 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    margin-top: 8px;
+  }
+  
+  #chatContainer {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    -webkit-overflow-scrolling: touch;
+    min-height: 0;
+  }
+  
+  .message {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    animation: fadeIn 0.3s ease;
+    align-items: flex-start;
+  }
+  
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  
+  .message-avatar {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  
+  .message.user .message-avatar {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+  }
+  
+  .message.assistant .message-avatar {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+  }
+  
+  .message-content {
+    background: white;
+    padding: 12px 14px;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    word-wrap: break-word;
+    flex: 1;
+    max-width: 100%;
+  }
+  
+  .message-content p {
+    margin: 0 0 8px 0;
+  }
+  
+  .message-content p:last-child {
+    margin-bottom: 0;
+  }
+  
+  .message-content pre {
+    background: #f4f4f4;
+    padding: 8px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 8px 0;
+    direction: ltr;
+    text-align: left;
+  }
+  
+  .message-content code {
+    background: #f4f4f4;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    direction: ltr;
+  }
+  
+  .message-content pre code {
+    background: none;
+    padding: 0;
+  }
+  
+  .message-content ul, .message-content ol {
+    margin: 8px 0;
+    padding-right: 20px;
+  }
+  
+  .message-content li {
+    margin: 4px 0;
+  }
+  
+  .message-content strong {
+    font-weight: 600;
+    color: #333;
+  }
+  
+  .message-content em {
+    font-style: italic;
+  }
+  
+  .message-content blockquote {
+    border-right: 3px solid #ddd;
+    padding-right: 12px;
+    margin: 8px 0;
+    color: #666;
+  }
+  
+  .message-content h1, .message-content h2, .message-content h3 {
+    margin: 12px 0 8px 0;
+    font-weight: 600;
+  }
+  
+  .message-content h1 { font-size: 20px; }
+  .message-content h2 { font-size: 18px; }
+  .message-content h3 { font-size: 16px; }
+  
+  .message-content a {
+    color: #667eea;
+    text-decoration: none;
+  }
+  
+  .message-content a:hover {
+    text-decoration: underline;
+  }
+  
+  .citations {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #e0e0e0;
+  }
+  
+  .citation-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #666;
+    margin-bottom: 8px;
+  }
+  
+  .citation-item {
+    display: flex;
+    align-items: start;
+    gap: 8px;
+    padding: 8px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  
+  .citation-item:hover {
+    background: #e8eaf6;
+  }
+  
+  .citation-item.active {
+    background: #c5cae9;
+    border-left: 3px solid #667eea;
+  }
+  
+  .citation-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  
+  .citation-content {
+    flex: 1;
+  }
+  
+  .citation-filename {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 2px;
+  }
+  
+  .citation-quote {
+    color: #666;
+    font-style: italic;
+    margin-top: 4px;
+    padding-right: 8px;
+    border-right: 2px solid #ddd;
+  }
+  
+  .citation-url {
+    color: #667eea;
+    text-decoration: none;
+    word-break: break-all;
+  }
+  
+  .citation-url:hover {
+    text-decoration: underline;
+  }
+  
+  .citation-ref {
+    cursor: pointer;
+    transition: background 0.2s;
+    padding: 2px 4px;
+    border-radius: 3px;
+  }
+  
+  .citation-ref.highlighted {
+    background: #fff59d;
+    font-weight: 600;
+  }
+  
+  .file-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 11px;
+  }
+  
+  .file-tag {
+    background: #e8eaf6;
+    color: #5c6bc0;
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+  
+  #inputArea {
+    background: white;
+    border-top: 1px solid #e0e0e0;
+    padding: 12px;
+    flex-shrink: 0;
+    position: relative;
+    width: 100%;
+  }
+  
+  #fileList {
+    font-size: 11px;
+    color: #666;
+    margin-bottom: 8px;
+    padding: 8px;
+    background: #f9f9f9;
+    border-radius: 6px;
+    display: none;
+    white-space: pre-wrap;
+  }
+  
+  #fileList.visible {
+    display: block;
+  }
+  
+  .input-wrapper {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+  }
+  
+  #fileInputLabel {
+    background: #f0f0f0;
+    border: none;
+    padding: 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  
+  #fileInputLabel:hover {
+    background: #e0e0e0;
+  }
+  
+  #userInput {
+    flex: 1;
+    padding: 10px 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    min-height: 40px;
+    max-height: 120px;
+  }
+  
+  #sendBtn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: transform 0.2s, box-shadow 0.2s;
+    flex-shrink: 0;
+  }
+  
+  #sendBtn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  }
+  
+  #sendBtn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  
+  #attachments { display: none; }
+  
+  .info-msg {
+    text-align: center;
+    color: #999;
+    font-size: 14px;
+    margin-top: 40px;
+  }
+  
+  @media (max-width: 768px) {
+    header {
+      padding: 10px 12px;
+    }
+    
+    header h1 {
+      font-size: 16px;
+    }
+    
+    #settingsBtn {
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+    
+    #settingsPanel {
+      padding: 12px;
+    }
+    
+    .message-avatar {
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
+      font-size: 12px;
+    }
+    
+    .message-content {
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+    
+    #chatContainer {
+      padding: 12px;
+      padding-bottom: 8px;
+    }
+    
+    #inputArea {
+      padding: 10px;
+    }
+    
+    #userInput {
+      font-size: 16px;
+    }
+    
+    #sendBtn {
+      padding: 10px 16px;
+      font-size: 13px;
+    }
+  }
+</style>
+</head>
+<body>
+<header>
+  <button id="settingsBtn">⚙️ الإعدادات</button>
+  <h1>✨ مساعد الذكاء الاصطناعي</h1>
+</header>
+
+<div id="settingsPanel">
+  <div class="settings-grid">
+    <div class="setting-group">
+      <label>مفتاح API</label>
+      <input type="password" id="apiKey" placeholder="sk-...">
+    </div>
+    
+    <div class="setting-group">
+      <label>النموذج</label>
+      <select id="model">
+        <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
+        <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+        <option value="gpt-4.1">gpt-4.1</option>
+        <option value="gpt-5">gpt-5</option>
+      </select>
+    </div>
+    
+    <div class="setting-group">
+      <label>معرفات الملفات البعيدة (مفصولة بفاصلة أو سطر جديد)</label>
+      <textarea id="fileIds" placeholder="file_abc123, file_def456"></textarea>
+    </div>
+    
+    <div class="setting-group">
+      <label>معرف مخزن المتجهات (Vector Store ID)</label>
+      <input type="text" id="vectorStoreId" value="vs_6884db92ab208191b96f2eb841470866">
+    </div>
+    
+    <div class="setting-group">
+      <label>الأدوات المفعلة</label>
+      <div class="checkbox-group">
+        <label for="webSearchToggle">بحث الويب</label>
+        <input type="checkbox" id="webSearchToggle" checked>
+      </div>
+      <div class="checkbox-group">
+        <label for="fileSearchToggle">بحث الملفات</label>
+        <input type="checkbox" id="fileSearchToggle" checked>
+      </div>
+      <div class="checkbox-group">
+        <label for="codeInterpreterToggle">مفسر الأكواد</label>
+        <input type="checkbox" id="codeInterpreterToggle" checked>
+      </div>
+    </div>
+    
+    <div class="setting-group">
+      <div class="checkbox-group">
+        <label for="streamToggle">بث الردود مباشرة</label>
+        <input type="checkbox" id="streamToggle" checked>
+      </div>
+    </div>
+  </div>
+  
+  <div class="warn">
+    <b>⚠️ تحذير:</b> هذه الصفحة ترسل مفتاح API من المتصفح. استخدمها فقط للاختبارات المحلية السريعة.
+  </div>
+</div>
+
+<div id="chatContainer">
+  <div class="info-msg">ابدأ المحادثة بكتابة رسالة في الأسفل</div>
+</div>
+
+<div id="inputArea">
+  <div id="fileList"></div>
+  <div class="input-wrapper">
+    <button id="sendBtn">إرسال</button>
+    <textarea id="userInput" placeholder="اكتب رسالتك هنا..." rows="1"></textarea>
+    <label id="fileInputLabel" for="attachments" title="إرفاق ملفات">
+      📎
+    </label>
+    <input type="file" id="attachments" multiple accept="image/*,audio/*,.txt,.pdf,.docx">
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const MAX_INLINE_SIZE = 5 * 1024 * 1024;
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+marked.setOptions({
+  breaks: true,
+  gfm: true
+});
+
+let conversationHistory = [];
+
+$('settingsBtn').addEventListener('click', () => {
+  $('settingsPanel').classList.toggle('visible');
+});
+
+$('attachments').addEventListener('change', () => {
+  const files = $('attachments').files;
+  if (files.length > 0) {
+    $('fileList').classList.add('visible');
+    $('fileList').textContent = [...files].map(f => {
+      const size = (f.size/1024).toFixed(1);
+      const sizeLabel = f.size > MAX_INLINE_SIZE ? `${size} كيلوبايت - كبير جداً` : `${size} كيلوبايت`;
+      return `📄 ${f.name} (${sizeLabel})`;
+    }).join('\n');
+  } else {
+    $('fileList').classList.remove('visible');
+  }
+});
+
+$('userInput').addEventListener('input', (e) => {
+  e.target.style.height = 'auto';
+  e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+});
+
+$('userInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+$('sendBtn').addEventListener('click', sendMessage);
+
+async function sendMessage() {
+  const apiKey = $('apiKey').value.trim();
+  const userText = $('userInput').value.trim();
+  const localFiles = $('attachments').files;
+  const fileIds = parseFileIds($('fileIds').value);
+  
+  if (!apiKey) {
+    alert('الرجاء إدخال مفتاح API في الإعدادات');
+    $('settingsPanel').classList.add('visible');
+    return;
+  }
+  
+  if (!userText && !localFiles.length && !fileIds.length) {
+    return;
+  }
+  
+  const infoMsg = document.querySelector('.info-msg');
+  if (infoMsg) infoMsg.remove();
+  
+  $('sendBtn').disabled = true;
+  $('userInput').disabled = true;
+  
+  const filesToProcess = Array.from(localFiles);
+  const fileNames = filesToProcess.map(f => f.name);
+  
+  addMessage('user', userText, fileNames);
+  
+  $('userInput').value = '';
+  $('userInput').style.height = 'auto';
+  $('attachments').value = '';
+  $('fileList').classList.remove('visible');
+  
+  try {
+    const content = await buildContent(userText, filesToProcess);
+    
+    const tools = [];
+    const webSearchEnabled = $('webSearchToggle').checked;
+    const fileSearchEnabled = $('fileSearchToggle').checked;
+    const codeInterpreterEnabled = $('codeInterpreterToggle').checked;
+    const vectorStoreId = $('vectorStoreId').value.trim();
+    
+    if (webSearchEnabled) {
+      tools.push({ type: 'web_search' });
+    }
+    
+    if (fileSearchEnabled) {
+      const fileSearchTool = { type: 'file_search' };
+      if (vectorStoreId) {
+        fileSearchTool.vector_store_ids = [vectorStoreId];
+      }
+      tools.push(fileSearchTool);
+    }
+    
+    if (codeInterpreterEnabled) {
+      tools.push({ 
+        type: 'code_interpreter',
+        container: {
+          type: 'auto'
+        }
+      });
+    }
+    
+    const attachments = fileIds.map(id => ({
+      file_id: id,
+      tools: fileSearchEnabled ? [{ type: 'file_search' }] : []
+    }));
+    
+    const body = {
+      model: $('model').value,
+      input: [{ role: 'user', content }],
+      tools: tools.length > 0 ? tools : undefined,
+      attachments: attachments.length > 0 ? attachments : undefined,
+      stream: $('streamToggle').checked || false
+    };
+    
+    const assistantMsgId = addMessage('assistant', '');
+    
+    if ($('streamToggle').checked) {
+      await streamResponse(apiKey, body, assistantMsgId);
+    } else {
+      await jsonResponse(apiKey, body, assistantMsgId);
+    }
+  } catch (e) {
+    addMessage('assistant', `❌ خطأ: ${e.message || e}`);
+  }
+  
+  $('sendBtn').disabled = false;
+  $('userInput').disabled = false;
+  $('userInput').focus();
+}
+
+function addMessage(role, text, files = [], annotations = []) {
+  const container = $('chatContainer');
+  const msgDiv = document.createElement('div');
+  msgDiv.className = `message ${role}`;
+  msgDiv.dataset.id = Date.now();
+  
+  const avatar = document.createElement('div');
+  avatar.className = 'message-avatar';
+  avatar.textContent = role === 'user' ? 'أ' : 'AI';
+  
+  const content = document.createElement('div');
+  content.className = 'message-content';
+  
+  if (role === 'assistant') {
+    let processedText = text || '...';
+    if (annotations && annotations.length > 0) {
+      annotations.forEach((ann, idx) => {
+        const marker = `【${ann.text}】`;
+        processedText = processedText.replace(new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 
+          `<sup class="citation-ref" data-citation="${idx}">[${idx + 1}]</sup>`);
+      });
+    }
+    content.innerHTML = marked.parse(processedText);
+    
+    if (annotations && annotations.length > 0) {
+      const citationsDiv = createCitationsSection(annotations);
+      content.appendChild(citationsDiv);
+      
+      setTimeout(() => addCitationClickHandlers(msgDiv), 0);
+    }
+  } else {
+    content.textContent = text;
+  }
+  
+  msgDiv.appendChild(avatar);
+  msgDiv.appendChild(content);
+  
+  if (files && files.length > 0) {
+    const fileDiv = document.createElement('div');
+    fileDiv.className = 'file-attachments';
+    files.forEach(name => {
+      const tag = document.createElement('span');
+      tag.className = 'file-tag';
+      tag.textContent = `📎 ${name}`;
+      fileDiv.appendChild(tag);
+    });
+    content.appendChild(fileDiv);
+  }
+  
+  container.appendChild(msgDiv);
+  container.scrollTop = container.scrollHeight;
+  
+  return msgDiv.dataset.id;
+}
+
+function createCitationsSection(annotations) {
+  const citationsDiv = document.createElement('div');
+  citationsDiv.className = 'citations';
+  
+  const title = document.createElement('div');
+  title.className = 'citation-title';
+  title.textContent = '📚 المصادر:';
+  citationsDiv.appendChild(title);
+  
+  annotations.forEach((ann, idx) => {
+    const citationItem = document.createElement('div');
+    citationItem.className = 'citation-item';
+    citationItem.dataset.citation = idx;
+    
+    const icon = document.createElement('div');
+    icon.className = 'citation-icon';
+    icon.textContent = ann.type === 'url_citation' ? '🔗' : '📄';
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'citation-content';
+    
+    const number = document.createElement('strong');
+    number.textContent = `[${idx + 1}] `;
+    contentDiv.appendChild(number);
+    
+    if (ann.type === 'file_citation') {
+      const filename = document.createElement('div');
+      filename.className = 'citation-filename';
+      filename.textContent = ann.file_name || ann.file_id || 'ملف';
+      contentDiv.appendChild(filename);
+      
+      if (ann.quote) {
+        const quote = document.createElement('div');
+        quote.className = 'citation-quote';
+        quote.textContent = `"${ann.quote}"`;
+        contentDiv.appendChild(quote);
+      }
+    } else if (ann.type === 'url_citation') {
+      const url = document.createElement('a');
+      url.className = 'citation-url';
+      url.href = ann.url;
+      url.target = '_blank';
+      url.textContent = ann.title || ann.url;
+      contentDiv.appendChild(url);
+      
+      if (ann.quote) {
+        const quote = document.createElement('div');
+        quote.className = 'citation-quote';
+        quote.textContent = `"${ann.quote}"`;
+        contentDiv.appendChild(quote);
+      }
+    }
+    
+    citationItem.appendChild(icon);
+    citationItem.appendChild(contentDiv);
+    citationsDiv.appendChild(citationItem);
+  });
+  
+  return citationsDiv;
+}
+
+function addCitationClickHandlers(messageDiv) {
+  const citationItems = messageDiv.querySelectorAll('.citation-item');
+  const citationRefs = messageDiv.querySelectorAll('.citation-ref');
+  
+  citationItems.forEach(item => {
+    item.addEventListener('click', () => {
+      const citationIndex = item.dataset.citation;
+      
+      citationItems.forEach(ci => ci.classList.remove('active'));
+      citationRefs.forEach(cr => cr.classList.remove('highlighted'));
+      
+      item.classList.add('active');
+      citationRefs.forEach(ref => {
+        if (ref.dataset.citation === citationIndex) {
+          ref.classList.add('highlighted');
+        }
+      });
+      
+      const firstRef = messageDiv.querySelector(`.citation-ref[data-citation="${citationIndex}"]`);
+      if (firstRef) {
+        firstRef.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+  });
+  
+  citationRefs.forEach(ref => {
+    ref.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const citationIndex = ref.dataset.citation;
+      
+      citationItems.forEach(ci => ci.classList.remove('active'));
+      citationRefs.forEach(cr => cr.classList.remove('highlighted'));
+      
+      const sourceItem = messageDiv.querySelector(`.citation-item[data-citation="${citationIndex}"]`);
+      if (sourceItem) {
+        sourceItem.classList.add('active');
+        sourceItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      
+      citationRefs.forEach(r => {
+        if (r.dataset.citation === citationIndex) {
+          r.classList.add('highlighted');
+        }
+      });
+    });
+  });
+}
+
+function updateMessage(msgId, text, annotations = []) {
+  const msg = document.querySelector(`[data-id="${msgId}"]`);
+  if (msg) {
+    const content = msg.querySelector('.message-content');
+    
+    let processedText = text || '...';
+    if (annotations && annotations.length > 0) {
+      annotations.forEach((ann, idx) => {
+        const marker = `【${ann.text}】`;
+        processedText = processedText.replace(new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 
+          `<sup class="citation-ref" data-citation="${idx}">[${idx + 1}]</sup>`);
+      });
+    }
+    
+   
+    content.innerHTML = marked.parse(processedText);
+    // Add citations section if available
+    if (annotations && annotations.length > 0) {
+      const existingCitations = content.querySelector('.citations');
+      if (existingCitations) {
+        existingCitations.remove();
+      }
+      const citationsDiv = createCitationsSection(annotations);
+      content.appendChild(citationsDiv);
+    }
+    
+    $('chatContainer').scrollTop = $('chatContainer').scrollHeight;
+  }
+    
+}
+
+function parseFileIds(s) {
+  if (!s) return [];
+  return s.split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
+}
+
+async function buildContent(userText, files) {
+  const parts = [];
+  if (userText) parts.push({ type: 'input_text', text: userText });
+  
+  for (const f of files) {
+    if (f.size > MAX_INLINE_SIZE) {
+      parts.push({ type: 'input_text', text: `[ملاحظة: ${f.name} كبير جداً. قم بالرفع عبر /v1/files API.]` });
+      continue;
+    }
+    
+    if (f.type.startsWith('image/')) {
+      const dataUrl = await readAsDataURL(f);
+      parts.push({ type: 'input_image', image_url: dataUrl });
+    } else if (f.type.startsWith('audio/')) {
+      const { base64, fmt } = await toBase64Fmt(f);
+      parts.push({ type: 'input_audio', audio: { data: base64, format: fmt } });
+    } else if (isPdf(f)) {
+      const text = await extractPdfText(f);
+      parts.push({ type: 'input_text', text: `ملف ${f.name} (PDF):\n${text}` });
+    } else if (isDocx(f)) {
+      const text = await extractDocxText(f);
+      parts.push({ type: 'input_text', text: `ملف ${f.name} (DOCX):\n${text}` });
+    } else if (isTxt(f)) {
+      const txt = await readAsText(f);
+      parts.push({ type: 'input_text', text: `ملف ${f.name}:\n${txt}` });
+    }
+  }
+  return parts;
+}
+
+function isTxt(file) {
+  const n = (file.name || '').toLowerCase();
+  return file.type === 'text/plain' || n.endsWith('.txt');
+}
+
+function isPdf(file) {
+  const n = (file.name || '').toLowerCase();
+  return file.type === 'application/pdf' || n.endsWith('.pdf');
+}
+
+function isDocx(file) {
+  const n = (file.name || '').toLowerCase();
+  return file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || n.endsWith('.docx');
+}
+
+async function extractPdfText(file) {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let text = '';
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items.map(item => item.str).join(' ');
+      text += `\n--- صفحة ${i} ---\n${pageText}\n`;
+    }
+    return text || '[لم يتم استخراج نص من PDF]';
+  } catch (e) {
+    return `[خطأ في استخراج PDF: ${e.message}]`;
+  }
+}
+
+async function extractDocxText(file) {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    return result.value || '[لم يتم استخراج نص من DOCX]';
+  } catch (e) {
+    return `[خطأ في استخراج DOCX: ${e.message}]`;
+  }
+}
+
+function readAsDataURL(file) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(file); });
+}
+
+function readAsText(file) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result || '')); r.onerror = () => rej(r.error); r.readAsText(file); });
+}
+
+async function toBase64Fmt(file) {
+  const buf = await file.arrayBuffer();
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const t = (file.type || '').toLowerCase();
+  let fmt = 'mp3';
+  if (t.includes('wav')) fmt = 'wav';
+  else if (t.includes('mpeg') || t.includes('mp3')) fmt = 'mp3';
+  else if (t.includes('m4a') || file.name.toLowerCase().endsWith('.m4a')) fmt = 'm4a';
+  else if (t.includes('ogg')) fmt = 'ogg';
+  else if (t.includes('webm')) fmt = 'webm';
+  return { base64, fmt };
+}
+
+async function streamResponse(apiKey, body, msgId) {
+  const r = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  
+  if (!r.ok) {
+    let msg = `${r.status} ${r.statusText}`;
+    try { const j = await r.json(); if (j?.error?.message) msg = j.error.message; } catch {}
+    throw new Error(msg);
+  }
+  
+  const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  let fullText = '';
+  let annotations = [];
+  
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop();
+    
+    for (const frame of frames) {
+      let event = null, data = '';
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data += (data ? '\n' : '') + line.slice(5).trim();
+      }
+      if (!data) continue;
+      try {
+        const payload = JSON.parse(data);
+        
+        if (event === 'response.output_text.delta' && payload?.delta) {
+          fullText += payload.delta;
+          updateMessage(msgId, fullText, annotations);
+        }
+        
+        if (event === 'response.output_text.annotation.added' && payload?.annotation) {
+          // Add annotation when it arrives
+          const ann = payload.annotation;
+          annotations.push({
+            type: ann.type,
+            text: ann.text || `${ann.index || 0}:0†source`,
+            file_id: ann.file_id,
+            file_name: ann.filename || ann.file_name,
+            quote: ann.quote,
+            url: ann.url,
+            title: ann.title,
+            index: ann.index
+          });
+          updateMessage(msgId, fullText, annotations);
+        }
+        
+        if (event === 'response.output_text.done' && payload?.output_text) {
+          fullText = payload.output_text;
+          if (payload.annotations) {
+            annotations = payload.annotations;
+          }
+          updateMessage(msgId, fullText, annotations);
+        }
+        
+        if (event === 'response.done' && payload?.output) {
+          // Extract final text and annotations from complete response
+          if (Array.isArray(payload.output)) {
+            for (const item of payload.output) {
+              if (Array.isArray(item?.content)) {
+                for (const c of item.content) {
+                  if (c?.type === 'output_text') {
+                    if (c.text) fullText = c.text;
+                    if (c.annotations) annotations = c.annotations;
+                  }
+                }
+              }
+            }
+          }
+          updateMessage(msgId, fullText, annotations);
+        }
+        
+        if (event === 'response.error') {
+          throw new Error(payload?.error?.message || 'خطأ في البث');
+        }
+      } catch {}
+    }
+  }
+}
+
+async function jsonResponse(apiKey, body, msgId) {
+  const r = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j?.error?.message || r.statusText);
+  
+  let text = '';
+  let annotations = [];
+  
+  if (typeof j.output_text === 'string') {
+    text = j.output_text;
+    if (j.annotations) annotations = j.annotations;
+  } else if (Array.isArray(j.output)) {
+    for (const item of j.output) {
+      if (Array.isArray(item?.content)) {
+        for (const c of item.content) {
+          if (c?.type === 'output_text') {
+            if (typeof c?.text === 'string') text += c.text;
+            if (c.annotations) annotations = annotations.concat(c.annotations);
+          }
+        }
+      }
+    }
+  }
+  
+  updateMessage(msgId, text || '[لا يوجد نص في الرد]', annotations);
+}
+</script>
+</body>
+</html>
