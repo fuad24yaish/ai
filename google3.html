@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OpenAI Responses Streaming (Secure)</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: auto; padding: 20px; }
+        #controls { margin-bottom: 20px; }
+        #userInput { width: 100%; padding: 8px; box-sizing: border-box; }
+        #responseArea { white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; min-height: 100px; background-color: #f9f9f9; }
+        button { padding: 10px 15px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h1>OpenAI Responses Streaming (Secure Method)</h1>
+    <p>
+        This example uses a secure backend server to protect your API key, as required by the `responses` endpoint.
+    </p>
+
+    <div id="controls">
+        <label for="userInput">Your Prompt:</label>
+        <input type="text" id="userInput" placeholder="Enter your prompt here">
+        <button onclick="streamOpenAIResponse()">Start Streaming</button>
+    </div>
+
+    <h2>Response</h2>
+    <div id="responseArea"></div>
+
+    <script>
+        // Keep track of the conversation ID on the client side
+        // This is sent to the backend, but the backend handles the actual state management
+        let conversationId = null;
+
+        async function streamOpenAIResponse() {
+            const userInput = document.getElementById('userInput').value;
+            const responseArea = document.getElementById('responseArea');
+            responseArea.innerText = ''; // Clear previous content
+
+            try {
+                const response = await fetch('/api/stream-responses', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        input: userInput,
+                        conversationId: conversationId
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.text();
+                    throw new Error(`Server error: ${error}`);
+                }
+
+                const reader = response.body
+                    .pipeThrough(new TextDecoderStream())
+                    .getReader();
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+
+                    const lines = value.split('\n');
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.substring(6);
+                            if (data === '[DONE]') {
+                                continue;
+                            }
+                            const json = JSON.parse(data);
+                            if (json.output && json.output[0] && json.output[0].content && json.output[0].content[0]) {
+                                responseArea.innerText += json.output[0].content[0].text;
+                            }
+                            // Store the conversation ID from the final chunk
+                            if (json.id) {
+                                conversationId = json.id;
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                responseArea.innerText = `Error: ${error.message}`;
+                console.error('Streaming error:', error);
+            }
+        }
+    </script>
+</body>
+</html>
