@@ -217,4 +217,62 @@ async function streamResponse(apiKey, body, responseArea){
   });
   if(!r.ok){
     let msg = `${r.status} ${r.statusText}`;
-    try { const j = await r.json(); if (j?.error?.message) msg =
+    try { const j = await r.json(); if (j?.error?.message) msg = j.error.message; } catch {}
+    throw new Error(msg);
+  }
+
+  const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  while(true){
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop();
+
+    for (const frame of frames){
+      let event = null, data = '';
+      for (const line of frame.split('\n')){
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data += (data ? '\n' : '') + line.slice(5).trim();
+      }
+      if (!data) continue;
+      try{
+        const payload = JSON.parse(data);
+        if (event === 'response.output_text.delta' && payload?.delta){
+          responseArea.textContent += payload.delta;
+        }
+        if (event === 'response.error'){
+          throw new Error(payload?.error?.message || 'Streaming error');
+        }
+      } catch { /* ignore keep-alives */ }
+    }
+  }
+}
+
+async function jsonResponse(apiKey, body, responseArea){
+  const r = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j?.error?.message || r.statusText);
+
+  let text = '';
+  if (typeof j.output_text === 'string') text = j.output_text;
+  else if (Array.isArray(j.output)){
+    for (const item of j.output){
+      if (Array.isArray(item?.content)){
+        for (const c of item.content){
+          if (c?.type === 'output_text' && typeof c?.text === 'string') text += c.text;
+        }
+      }
+    }
+  }
+  responseArea.textContent = text || '[No text output]';
+}
+</script>
+</body>
+</html>
