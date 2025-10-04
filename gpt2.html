@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>OpenAI Responses API with Attachments (Insecure Demo)</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: auto; padding: 20px; }
+    #controls { margin-bottom: 20px; }
+    #userInput, #apiKey { width: 100%; padding: 8px; box-sizing: border-box; }
+    #responseArea { white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; min-height: 120px; background: #f9f9f9; }
+    button { padding: 10px 15px; margin-top: 10px; }
+    .row { display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+    .row label { white-space: nowrap; }
+    #fileList { font-size: 12px; color: #444; margin-top: 6px; }
+    .warn { background:#fff7d6; border:1px solid #e7d070; padding:8px 10px; border-radius:6px; }
+    .muted { color:#666; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>OpenAI Responses API (Insecure Demo) — Attachments</h1>
+  <p class="warn"><strong>Warning:</strong> This page sends your API key from the browser.
+    For production, proxy requests through a secure backend. This demo supports
+    <strong>images</strong> and <strong>audio</strong> as attachments. Use the Files API + backend for PDFs or docs.</p>
+
+  <div id="controls">
+    <label for="apiKey">Your OpenAI API Key:</label>
+    <input type="password" id="apiKey" placeholder="sk-..." />
+
+    <br><br>
+    <label for="userInput">Your Prompt:</label>
+    <input type="text" id="userInput" placeholder="Describe this image / transcribe this audio / ask a question..." />
+
+    <div class="row">
+      <label><input type="checkbox" id="streamToggle" checked /> Stream output</label>
+      <label>Model:&nbsp;
+        <select id="model">
+          <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
+          <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+          <option value="gpt-4.1">gpt-4.1</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="row">
+      <label for="attachments"><strong>Attachments</strong> (images or audio):</label>
+      <input type="file" id="attachments" multiple accept="image/*,audio/*" />
+    </div>
+    <div id="fileList" class="muted"></div>
+
+    <button id="runBtn">Run</button>
+  </div>
+
+  <h2>Response</h2>
+  <div id="responseArea"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    $('attachments').addEventListener('change', renderFileList);
+    $('runBtn').addEventListener('click', run);
+
+    function renderFileList() {
+      const files = $('attachments').files;
+      if (!files || !files.length) {
+        $('fileList').textContent = '';
+        return;
+      }
+      const lines = [];
+      for (const f of files) lines.push(`• ${f.name} (${f.type || 'unknown'}, ${Math.round(f.size/1024)} KB)`);
+      $('fileList').textContent = lines.join('\n');
+    }
+
+    async function run() {
+      const apiKey = $('apiKey').value.trim();
+      const userInput = $('userInput').value;
+      const responseArea = $('responseArea');
+      const model = $('model').value;
+      const stream = $('streamToggle').checked;
+
+      responseArea.textContent = '';
+
+      if (!apiKey) return responseArea.textContent = 'Please enter your API key.';
+      if (!userInput && !($('attachments').files?.length)) {
+        return responseArea.textContent = 'Please enter a prompt or attach a file.';
+      }
+
+      try {
+        const content = await buildContentParts(userInput, $('attachments').files);
+        if (!content.length) {
+          responseArea.textContent = 'Nothing to send. (Unsupported file types?)';
+          return;
+        }
+
+        if (stream) {
+          await streamResponse({ apiKey, model, content, responseArea });
+        } else {
+          await nonStreamResponse({ apiKey, model, content, responseArea });
+        }
+      } catch (err) {
+        responseArea.textContent = `Error: ${err?.message || err}`;
+        console.error(err);
+      }
+    }
+
+    // Build content parts for the Responses API: [{role:"user", content:[...parts]}]
+    async function buildContentParts(userText, filesList) {
+      const parts = [];
+      if (userText) {
+        parts.push({ type: 'input_text', text: userText });
+      }
+
+      if (filesList && filesList.length) {
+        for (const file of filesList) {
+          if (file.type.startsWith('image/')) {
+            const dataUrl = await fileToDataURL(file);
+            // Image as Data URL
+            parts.push({
+              type: 'input_image',
+              image_url: dataUrl
+            });
+          } else if (file.type.startsWith('audio/')) {
+            const { base64, fmt } = await fileToBase64WithFormat(file);
+            parts.push({
+              type: 'input_audio',
+              audio: {
+                data: base64,
+                format: fmt
+              }
+            });
+          } else {
+            // Skip unsupported in-browser types (e.g., PDFs) for this front-end-only demo
+            console.warn(`Skipping unsupported file type: ${file.name} (${file.type})`);
+          }
+        }
+      }
+      return parts;
+    }
+
+    function fileToDataURL(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Failed to read file as data URL'));
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function fileToBase64WithFormat(file) {
+      const buf = await file.arrayBuffer();
+      const b64 = arrayBufferToBase64(buf);
+      const fmt = inferAudioFormat(file);
+      return { base64: b64, fmt };
+    }
+
+    function arrayBufferToBase64(buffer) {
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const sub = bytes.subarray(i, i + chunkSize);
+        binary += String.fromCharCode.apply(null, sub);
+      }
+      return btoa(binary);
+    }
+
+    function inferAudioFormat(file) {
+      // Map common MIME types to OpenAI expected "format" values
+      const t = (file.type || '').toLowerCase();
+      if (t.includes('wav')) return 'wav';
+      if (t.includes('mpeg') || t.includes('mp3')) return 'mp3';
+      if (t.includes('mp4') || t.includes('m4a') || file.name.toLowerCase().endsWith('.m4a')) return 'm4a';
+      if (t.includes('ogg')) return 'ogg';
+      if (t.includes('webm')) return 'webm';
+      // Fallback by extension
+      const n = file.name.toLowerCase();
+      if (n.endsWith('.wav')) return 'wav';
+      if (n.endsWith('.mp3')) return 'mp3';
+      if (n.endsWith('.m4a')) return 'm4a';
+      if (n.endsWith('.ogg')) return 'ogg';
+      if (n.endsWith('.webm')) return 'webm';
+      return 'mp3';
+    }
+
+    // --- Streaming via Responses API (SSE events) ---
+    async function streamResponse({ apiKey, model, content, responseArea }) {
+      const res = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          // Use structured content (supports images + audio)
+          input: [{ role: 'user', content }],
+          stream: true
+        })
+      });
+
+      if (!res.ok) {
+        let msg = `${res.status} ${res.statusText}`;
+        try { const j = await res.json(); if (j?.error?.message) msg = j.error.message; } catch {}
+        throw new Error(msg);
+      }
+
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += value;
+
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop(); // keep partial frame
+
+        for (const frame of frames) {
+          let event = null, data = '';
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('event:')) event = line.slice(6).trim();
+            else if (line.startsWith('data:')) data += (data ? '\n' : '') + line.slice(5).trim();
+          }
+          if (!data) continue;
+
+          try {
+            const payload = JSON.parse(data);
+
+            if (event === 'response.output_text.delta' && payload?.delta) {
+              responseArea.textContent += payload.delta;
+            }
+            if (event === 'response.error') {
+              throw new Error(payload?.error?.message || 'Streaming error');
+            }
+            // Optional hooks:
+            // if (event === 'response.completed') { /* done */ }
+            // if (event?.startsWith('response.output_tool_call')) { /* handle tool calls if you add tools later */ }
+          } catch { /* ignore keep-alives */ }
+        }
+      }
+    }
+
+    // --- Non-streaming JSON response ---
+    async function nonStreamResponse({ apiKey, model, content, responseArea }) {
+      const res = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          input: [{ role: 'user', content }]
+        })
+      });
+
+      if (!res.ok) {
+        let msg = `${res.status} ${res.statusText}`;
+        try { const j = await res.json(); if (j?.error?.message) msg = j.error.message; } catch {}
+        throw new Error(msg);
+      }
+
+      const json = await res.json();
+      let text = '';
+      if (typeof json.output_text === 'string') {
+        text = json.output_text;
+      } else if (Array.isArray(json.output)) {
+        for (const item of json.output) {
+          if (Array.isArray(item?.content)) {
+            for (const c of item.content) {
+              if (c?.type === 'output_text' && typeof c?.text === 'string') text += c.text;
+            }
+          }
+        }
+      }
+      responseArea.textContent = text || '[No text output]';
+    }
+  </script>
+</body>
+</html>
