@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>OpenAI Responses API — Full Attachments (Insecure Demo)</title>
+<style>
+body{font-family:Arial,Helvetica,sans-serif;max-width:900px;margin:auto;padding:20px}
+#responseArea{white-space:pre-wrap;border:1px solid #ccc;padding:10px;min-height:150px;background:#fafafa}
+input,select,button{padding:8px;margin-top:6px}
+.warn{background:#fff7d6;border:1px solid #e7d070;padding:8px 10px;border-radius:6px}
+</style>
+</head>
+<body>
+<h1>Responses API — Attachments Demo</h1>
+<p class="warn"><b>Warning:</b> This page sends your API key directly to OpenAI.
+Use only for local testing.</p>
+
+<label>API Key:</label><br>
+<input type="password" id="apiKey" placeholder="sk-..." size="60"><br><br>
+
+<label>Prompt:</label><br>
+<input type="text" id="userInput" style="width:100%" placeholder="Ask about the files or type a question..."><br>
+
+<label>Attachments (images / audio / PDF / Word / text):</label><br>
+<input type="file" id="attachments" multiple accept="image/*,audio/*,.pdf,.doc,.docx,.txt"><br>
+<div id="fileList" style="font-size:12px;color:#555"></div>
+
+<label>Model:</label>
+<select id="model">
+  <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
+  <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+  <option value="gpt-4.1">gpt-4.1</option>
+</select>
+<label><input type="checkbox" id="streamToggle" checked> Stream</label>
+<br><br>
+<button id="runBtn">Run</button>
+
+<h2>Response</h2>
+<div id="responseArea"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+$('attachments').addEventListener('change',()=> {
+  const files=$('attachments').files;
+  $('fileList').textContent=[...files].map(f=>`• ${f.name} (${f.type||'unknown'}, ${(f.size/1024).toFixed(1)} KB)`).join('\n');
+});
+$('runBtn').addEventListener('click',run);
+
+async function run(){
+  const apiKey=$('apiKey').value.trim();
+  const userInput=$('userInput').value;
+  const responseArea=$('responseArea');
+  const model=$('model').value;
+  const stream=$('streamToggle').checked;
+  const files=$('attachments').files;
+  responseArea.textContent='';
+
+  if(!apiKey)return responseArea.textContent='Enter API key.';
+  if(!userInput && !files.length)return responseArea.textContent='Enter a prompt or attach files.';
+
+  try{
+    const content=await buildContent(userInput,files);
+    if(stream)await streamResponse({apiKey,model,content,responseArea});
+    else await jsonResponse({apiKey,model,content,responseArea});
+  }catch(e){responseArea.textContent='Error: '+e.message;console.error(e);}
+}
+
+async function buildContent(text,files){
+  const parts=[];
+  if(text)parts.push({type:'input_text',text});
+  for(const f of files){
+    if(f.type.startsWith('image/')){
+      const data=await readAsDataURL(f);
+      parts.push({type:'input_image',image_url:data});
+    }else if(f.type.startsWith('audio/')){
+      const {base64,fmt}=await toBase64Fmt(f);
+      parts.push({type:'input_audio',audio:{data:base64,format:fmt}});
+    }else{
+      // PDF / Word / Text as base64 blob
+      const base64=await readAsBase64(f);
+      const subtype=detectFileType(f);
+      parts.push({type:'input_file',file:{data:base64,format:subtype,filename:f.name}});
+    }
+  }
+  return parts;
+}
+
+function readAsDataURL(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(r.error);r.readAsDataURL(file);});}
+function readAsBase64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>{const b64=r.result.split(',')[1]||btoa(String.fromCharCode(...new Uint8Array(r.result)));res(b64)};r.onerror=()=>rej(r.error);r.readAsDataURL(file);});}
+async function toBase64Fmt(file){const buf=await file.arrayBuffer();return{base64:btoa(String.fromCharCode(...new Uint8Array(buf))),fmt:inferAudioFmt(file)};}
+function inferAudioFmt(f){const t=f.type.toLowerCase();if(t.includes('wav'))return'wav';if(t.includes('mpeg')||t.includes('mp3'))return'mp3';if(t.includes('m4a'))return'm4a';if(t.includes('ogg'))return'ogg';if(t.includes('webm'))return'webm';return'mp3';}
+function detectFileType(f){const n=f.name.toLowerCase();if(n.endsWith('.pdf'))return'pdf';if(n.endsWith('.docx'))return'docx';if(n.endsWith('.doc'))return'doc';if(n.endsWith('.txt'))return'txt';return'bin';}
+
+async function streamResponse({apiKey,model,content,responseArea}){
+  const r=await fetch('https://api.openai.com/v1/responses',{
+    method:'POST',
+    headers:{'Authorization':`Bearer ${apiKey}`,'Content-Type':'application/json'},
+    body:JSON.stringify({model,input:[{role:'user',content}],stream:true})
+  });
+  if(!r.ok)throw new Error((await r.text())||r.statusText);
+  const reader=r.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf='';
+  while(true){
+    const {value,done}=await reader.read();
+    if(done)break;
+    buf+=value;
+    const frames=buf.split('\n\n');buf=frames.pop();
+    for(const f of frames){
+      let event=null,data='';
+      for(const line of f.split('\n')){
+        if(line.startsWith('event:'))event=line.slice(6).trim();
+        else if(line.startsWith('data:'))data+=(data?'\n':'')+line.slice(5).trim();
+      }
+      if(!data)continue;
+      try{
+        const j=JSON.parse(data);
+        if(event==='response.output_text.delta'&&j.delta)responseArea.textContent+=j.delta;
+      }catch{}
+    }
+  }
+}
+
+async function jsonResponse({apiKey,model,content,responseArea}){
+  const r=await fetch('https://api.openai.com/v1/responses',{
+    method:'POST',
+    headers:{'Authorization':`Bearer ${apiKey}`,'Content-Type':'application/json'},
+    body:JSON.stringify({model,input:[{role:'user',content}]})
+  });
+  const j=await r.json();
+  if(!r.ok)throw new Error(j?.error?.message||r.statusText);
+  responseArea.textContent=j.output_text||extractText(j)||'[No text output]';
+}
+
+function extractText(j){
+  let t='';if(Array.isArray(j.output))for(const o of j.output)for(const c of (o.content||[]))if(c.type==='output_text')t+=c.text;return t;
+}
+</script>
+</body>
+</html>
