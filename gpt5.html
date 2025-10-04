@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Responses API — Auto File Handling (Insecure Demo)</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;max-width:960px;margin:auto;padding:20px}
+  input,select,button,textarea{padding:8px;margin-top:6px}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  #responseArea{white-space:pre-wrap;border:1px solid #ccc;padding:10px;min-height:150px;background:#fafafa}
+  #fileList{font-size:12px;color:#555;white-space:pre-wrap;margin-top:6px}
+  .warn{background:#fff7d6;border:1px solid #e7d070;padding:8px 10px;border-radius:6px}
+  .muted{color:#666;font-size:12px}
+  .status-ok{color:#19733e}
+  .status-err{color:#a11}
+</style>
+</head>
+<body>
+<h1>Responses API — Auto File Handling</h1>
+<p class="warn"><b>Warning:</b> This page sends your API key from the browser. Use only for local testing.</p>
+
+<label>API Key:</label><br/>
+<input type="password" id="apiKey" placeholder="sk-..." size="60"/><br/><br/>
+
+<label>Prompt:</label><br/>
+<input type="text" id="userInput" style="width:100%" placeholder="Ask about the files or type your question..."/>
+
+<div class="row" style="margin-top:10px">
+  <label>Attachments (any files):</label>
+  <input type="file" id="attachments" multiple />
+</div>
+<div id="fileList"></div>
+
+<div class="row" style="margin-top:10px">
+  <label>Model:</label>
+  <select id="model">
+    <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
+    <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+    <option value="gpt-4.1">gpt-4.1</option>
+  </select>
+  <label><input type="checkbox" id="streamToggle" checked/> Stream</label>
+</div>
+
+<br/>
+<button id="runBtn">Run</button>
+
+<h2>Response</h2>
+<div id="responseArea"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+$('attachments').addEventListener('change', renderFileList);
+$('runBtn').addEventListener('click', run);
+
+function renderFileList() {
+  const files = $('attachments').files;
+  if (!files?.length) { $('fileList').textContent = ''; return; }
+  $('fileList').textContent = [...files]
+    .map(f => `• ${f.name} (${f.type || 'unknown'}, ${(f.size/1024).toFixed(1)} KB)`)
+    .join('\n');
+}
+
+function inferAudioFmt(file){
+  const t = (file.type || '').toLowerCase();
+  const n = (file.name || '').toLowerCase();
+  if (t.includes('wav') || n.endsWith('.wav')) return 'wav';
+  if (t.includes('mpeg') || t.includes('mp3') || n.endsWith('.mp3')) return 'mp3';
+  if (t.includes('m4a') || n.endsWith('.m4a')) return 'm4a';
+  if (t.includes('ogg') || n.endsWith('.ogg')) return 'ogg';
+  if (t.includes('webm') || n.endsWith('.webm')) return 'webm';
+  return 'mp3';
+}
+
+function extOf(name=''){ const n=name.toLowerCase(); const i=n.lastIndexOf('.'); return i>=0?n.slice(i+1):''; }
+function isImage(f){ return (f.type||'').startsWith('image/'); }
+function isAudio(f){ return (f.type||'').startsWith('audio/'); }
+function isTxt(f){ return (f.type === 'text/plain') || extOf(f.name)==='txt'; }
+function needsUpload(f){
+  const e = extOf(f.name);
+  // Word/PDF and most office docs should be uploaded via Files API
+  return ['pdf','doc','docx','ppt','pptx','xls','xlsx','csv','rtf','odt','odp','ods'].includes(e);
+}
+
+function readAsDataURL(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsDataURL(file); }); }
+function readAsText(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result||'')); r.onerror=()=>rej(r.error); r.readAsText(file); }); }
+async function toBase64(file){ const buf=await file.arrayBuffer(); return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+
+async function uploadToOpenAI(apiKey, file, purpose='assistants'){
+  const form = new FormData();
+  form.append('file', file, file.name);
+  form.append('purpose', purpose);
+  const res = await fetch('https://api.openai.com/v1/files', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}` },
+    body: form
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json?.error?.message || res.statusText);
+  }
+  return json.id; // file_id
+}
+
+async function buildInputsAndAttachments(apiKey, files, userText, statusCb){
+  const contentParts = [];
+  const attachments = [];
+
+  if (userText) contentParts.push({ type: 'input_text', text: userText });
+
+  for (const f of files){
+    try {
+      statusCb(`Processing ${f.name}...`);
+      if (isImage(f)) {
+        const dataUrl = await readAsDataURL(f);
+        contentParts.push({ type: 'input_image', image_url: dataUrl });
+        statusCb(`${f.name}: added as inline image.`, 'ok');
+      } else if (isAudio(f)) {
+        const base64 = await toBase64(f);
+        const fmt = inferAudioFmt(f);
+        contentParts.push({ type: 'input_audio', audio: { data: base64, format: fmt } });
+        statusCb(`${f.name}: added as inline audio (${fmt}).`, 'ok');
+      } else if (isTxt(f)) {
+        const txt = await readAsText(f);
+        contentParts.push({ type: 'input_text', text: `File ${f.name}:\n${txt}` });
+        statusCb(`${f.name}: inlined as text.`, 'ok');
+      } else if (needsUpload(f)) {
+        const fileId = await uploadToOpenAI(apiKey, f, 'assistants');
+        attachments.push({ file_id: fileId, tools: [{ type: 'file_search' }] });
+        statusCb(`${f.name}: uploaded → ${fileId}.`, 'ok');
+      } else {
+        // Fallback: try upload for unknown types
+        const fileId = await uploadToOpenAI(apiKey, f, 'assistants');
+        attachments.push({ file_id: fileId, tools: [{ type: 'file_search' }] });
+        statusCb(`${f.name}: uploaded (generic) → ${fileId}.`, 'ok');
+      }
+    } catch (err) {
+      statusCb(`${f.name}: upload/processing failed — ${err.message || err}`, 'err');
+    }
+  }
+
+  return { contentParts, attachments };
+}
+
+function appendStatus(msg, kind){
+  const el = $('fileList');
+  const line = `${msg}`;
+  const span = document.createElement('div');
+  span.textContent = line;
+  if (kind==='ok') span.className='status-ok';
+  if (kind==='err') span.className='status-err';
+  el.appendChild(span);
+}
+
+async function run(){
+  const apiKey = $('apiKey').value.trim();
+  const userInput = $('userInput').value;
+  const model = $('model').value;
+  const stream = $('streamToggle').checked;
+  const files = $('attachments').files;
+  const responseArea = $('responseArea');
+
+  responseArea.textContent = '';
+  $('fileList').textContent = $('fileList').textContent; // keep current list header
+
+  if (!apiKey) { responseArea.textContent = 'Enter API key.'; return; }
+  if (!userInput && !files.length) { responseArea.textContent = 'Enter a prompt or attach files.'; return; }
+
+  try {
+    const { contentParts, attachments } = await buildInputsAndAttachments(apiKey, files, userInput, appendStatus);
+
+    const body = {
+      model,
+      input: [{ role: 'user', content: contentParts }],
+      ...(attachments.length ? { tools: [{ type: 'file_search' }], attachments } : {}),
+      ...(stream ? { stream: true } : {})
+    };
+
+    if (stream) {
+      await streamResponse(apiKey, body, responseArea);
+    } else {
+      await jsonResponse(apiKey, body, responseArea);
+    }
+  } catch (e) {
+    responseArea.textContent = 'Error: ' + (e?.message || e);
+    console.error(e);
+  }
+}
+
+async function streamResponse(apiKey, body, responseArea){
+  const r = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) {
+    let msg = `${r.status} ${r.statusText}`;
+    try { const j = await r.json(); if (j?.error?.message) msg = j.error.message; } catch {}
+    throw new Error(msg);
+  }
+  const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop();
+
+    for (const frame of frames) {
+      let event = null, data = '';
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data += (data ? '\n' : '') + line.slice(5).trim();
+      }
+      if (!data) continue;
+      try {
+        const payload = JSON.parse(data);
+        if (event === 'response.output_text.delta' && payload?.delta) {
+          responseArea.textContent += payload.delta;
+        }
+        if (event === 'response.error') {
+          throw new Error(payload?.error?.message || 'Streaming error');
+        }
+      } catch { /* ignore keep-alives */ }
+    }
+  }
+}
+
+async function jsonResponse(apiKey, body, responseArea){
+  const r = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j?.error?.message || r.statusText);
+  let text = '';
+  if (typeof j.output_text === 'string') text = j.output_text;
+  else if (Array.isArray(j.output)) {
+    for (const item of j.output) {
+      if (Array.isArray(item?.content)) {
+        for (const c of item.content) {
+          if (c?.type === 'output_text' && typeof c?.text === 'string') text += c.text;
+        }
+      }
+    }
+  }
+  responseArea.textContent = text || '[No text output]';
+}
+</script>
+</body>
+</html>
